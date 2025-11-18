@@ -17,7 +17,7 @@ if not TON_TOKEN:
 
 # Configuration optimisée
 CONFIG = {
-    'scan_interval': 300,  # 5 minutes
+    'scan_interval': 300,
     'request_delay': (3, 7),
     'max_requests_per_scan': 6,
     'user_agents': [
@@ -26,7 +26,6 @@ CONFIG = {
     ]
 }
 
-# Stockage des recherches
 user_searches = {}
 
 class VintedBot(commands.Bot):
@@ -92,6 +91,7 @@ class VintedBot(commands.Bot):
             return []
                 
         except Exception as e:
+            print(f"❌ Erreur scan: {e}")
             return []
     
     async def check_profit(self, item, search_config):
@@ -116,32 +116,37 @@ class VintedBot(commands.Bot):
                         'search_name': search_config['name']
                     }
             return None
-        except:
+        except Exception as e:
+            print(f"❌ Erreur profit: {e}")
             return None
     
     async def send_notification(self, deal, user_id):
-        embed = discord.Embed(
-            title="🚨 BONNE AFFAIRE!",
-            description=f"**{deal['title']}**",
-            color=0xff6b6b,
-            url=deal['url']
-        )
-        
-        embed.add_field(name="💰 Prix", value=f"{deal['price']}€", inline=True)
-        embed.add_field(name="💵 Profit", value=f"{deal['profit']:.1f}€", inline=True)
-        embed.add_field(name="🔍 Recherche", value=deal['search_name'], inline=False)
-        
-        user = await self.fetch_user(int(user_id))
-        if user:
-            try:
-                await user.send(embed=embed)
-            except:
-                for channel in self.get_all_channels():
-                    if isinstance(channel, discord.TextChannel):
-                        await channel.send(f"<@{user_id}>", embed=embed)
-                        break
-        
-        self.seen_items.add(deal['id'])
+        try:
+            embed = discord.Embed(
+                title="🚨 BONNE AFFAIRE!",
+                description=f"**{deal['title']}**",
+                color=0xff6b6b,
+                url=deal['url']
+            )
+            
+            embed.add_field(name="💰 Prix", value=f"{deal['price']}€", inline=True)
+            embed.add_field(name="💵 Profit", value=f"{deal['profit']:.1f}€", inline=True)
+            embed.add_field(name="🔍 Recherche", value=deal['search_name'], inline=False)
+            
+            user = await self.fetch_user(int(user_id))
+            if user:
+                try:
+                    await user.send(embed=embed)
+                    print(f"📨 Notification envoyée à {user.name}")
+                except:
+                    for channel in self.get_all_channels():
+                        if isinstance(channel, discord.TextChannel):
+                            await channel.send(f"<@{user_id}>", embed=embed)
+                            break
+            
+            self.seen_items.add(deal['id'])
+        except Exception as e:
+            print(f"❌ Erreur notification: {e}")
 
     @tasks.loop(minutes=5)
     async def vinted_scanner(self):
@@ -167,6 +172,8 @@ class VintedBot(commands.Bot):
         self.scan_count += 1
         if new_deals > 0:
             print(f"✅ {new_deals} nouvelles affaires!")
+        else:
+            print("ℹ️  Aucune nouvelle affaire cette fois.")
     
     @vinted_scanner.before_loop
     async def before_scanner(self):
@@ -177,77 +184,91 @@ bot = VintedBot()
 
 @bot.tree.command(name="add", description="Ajouter une recherche")
 async def add_search(interaction: discord.Interaction, nom: str, mots_cles: str, prix_max: float, marge: float = 1.8):
-    user_id = str(interaction.user.id)
-    
-    if user_id not in user_searches:
-        user_searches[user_id] = {}
-    
-    search_id = f"{nom}_{int(time.time())}"
-    user_searches[user_id][search_id] = {
-        'name': nom,
-        'keywords': mots_cles,
-        'max_price': prix_max,
-        'profit_margin': marge,
-        'min_profit': 8
-    }
-    
-    embed = discord.Embed(
-        title="✅ Recherche ajoutée!",
-        description=f"**{nom}**\n`{mots_cles}`\nMax: {prix_max}€ | Marge: {marge}x",
-        color=0x00ff00
-    )
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+    try:
+        user_id = str(interaction.user.id)
+        
+        if user_id not in user_searches:
+            user_searches[user_id] = {}
+        
+        search_id = f"{nom}_{int(time.time())}"
+        user_searches[user_id][search_id] = {
+            'name': nom,
+            'keywords': mots_cles,
+            'max_price': prix_max,
+            'profit_margin': marge,
+            'min_profit': 8
+        }
+        
+        embed = discord.Embed(
+            title="✅ Recherche ajoutée!",
+            description=f"**{nom}**\n`{mots_cles}`\nMax: {prix_max}€ | Marge: {marge}x",
+            color=0x00ff00
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+    except Exception as e:
+        await interaction.response.send_message("❌ Erreur lors de l'ajout!", ephemeral=True)
 
 @bot.tree.command(name="list", description="Lister mes recherches")
 async def list_searches(interaction: discord.Interaction):
-    user_id = str(interaction.user.id)
-    
-    if user_id not in user_searches or not user_searches[user_id]:
-        await interaction.response.send_message("❌ Aucune recherche!", ephemeral=True)
-        return
-    
-    embed = discord.Embed(title="📋 Tes recherches", color=0x3498db)
-    
-    for i, config in enumerate(user_searches[user_id].values(), 1):
-        embed.add_field(
-            name=f"{i}. {config['name']}",
-            value=f"`{config['keywords']}` | Max: {config['max_price']}€",
-            inline=False
-        )
-    
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+    try:
+        user_id = str(interaction.user.id)
+        
+        if user_id not in user_searches or not user_searches[user_id]:
+            await interaction.response.send_message("❌ Aucune recherche!", ephemeral=True)
+            return
+        
+        embed = discord.Embed(title="📋 Tes recherches", color=0x3498db)
+        
+        for i, config in enumerate(user_searches[user_id].values(), 1):
+            embed.add_field(
+                name=f"{i}. {config['name']}",
+                value=f"`{config['keywords']}` | Max: {config['max_price']}€",
+                inline=False
+            )
+        
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+    except Exception as e:
+        await interaction.response.send_message("❌ Erreur liste!", ephemeral=True)
 
 @bot.tree.command(name="remove", description="Supprimer une recherche")
 async def remove_search(interaction: discord.Interaction, numero: int):
-    user_id = str(interaction.user.id)
-    
-    if user_id not in user_searches:
-        await interaction.response.send_message("❌ Aucune recherche!", ephemeral=True)
-        return
-    
-    searches = list(user_searches[user_id].values())
-    if 1 <= numero <= len(searches):
-        search_name = searches[numero-1]['name']
-        # Trouver la clé à supprimer
-        keys = list(user_searches[user_id].keys())
-        del user_searches[user_id][keys[numero-1]]
+    try:
+        user_id = str(interaction.user.id)
         
-        await interaction.response.send_message(f"✅ **{search_name}** supprimée!", ephemeral=True)
-    else:
-        await interaction.response.send_message("❌ Numéro invalide!", ephemeral=True)
+        if user_id not in user_searches:
+            await interaction.response.send_message("❌ Aucune recherche!", ephemeral=True)
+            return
+        
+        searches = list(user_searches[user_id].values())
+        if 1 <= numero <= len(searches):
+            search_name = searches[numero-1]['name']
+            keys = list(user_searches[user_id].keys())
+            del user_searches[user_id][keys[numero-1]]
+            
+            await interaction.response.send_message(f"✅ **{search_name}** supprimée!", ephemeral=True)
+        else:
+            await interaction.response.send_message("❌ Numéro invalide!", ephemeral=True)
+    except Exception as e:
+        await interaction.response.send_message("❌ Erreur suppression!", ephemeral=True)
 
 @bot.tree.command(name="stats", description="Statistiques du bot")
 async def bot_stats(interaction: discord.Interaction):
-    total_searches = sum(len(searches) for searches in user_searches.values())
-    
-    embed = discord.Embed(title="📊 Stats du Bot", color=0x9b59b6)
-    embed.add_field(name="👥 Utilisateurs", value=len(user_searches), inline=True)
-    embed.add_field(name="🔍 Recherches", value=total_searches, inline=True)
-    embed.add_field(name="🔄 Scans", value=bot.scan_count, inline=True)
-    embed.add_field(name="💾 Articles", value=len(bot.seen_items), inline=True)
-    
-    await interaction.response.send_message(embed=embed)
+    try:
+        total_searches = sum(len(searches) for searches in user_searches.values())
+        
+        embed = discord.Embed(title="📊 Stats du Bot", color=0x9b59b6)
+        embed.add_field(name="👥 Utilisateurs", value=len(user_searches), inline=True)
+        embed.add_field(name="🔍 Recherches", value=total_searches, inline=True)
+        embed.add_field(name="🔄 Scans", value=bot.scan_count, inline=True)
+        embed.add_field(name="💾 Articles", value=len(bot.seen_items), inline=True)
+        
+        await interaction.response.send_message(embed=embed)
+    except Exception as e:
+        await interaction.response.send_message("❌ Erreur stats!", ephemeral=True)
 
 # 🚀 LANCEMENT
 if __name__ == "__main__":
-    bot.run(TON_TOKEN)
+    try:
+        bot.run(TON_TOKEN)
+    except Exception as e:
+        print(f"❌ ERREUR CRITIQUE: {e}")
