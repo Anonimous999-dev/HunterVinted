@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: vinted-bot
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bot_ultime.py
+    envVars:
+      - key: DISCORD_TOKEN
+        fromSecret: true
