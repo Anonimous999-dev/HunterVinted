@@ -7,6 +7,8 @@ import random
 import time
 from datetime import datetime
 
+print("🚀 Démarrage du bot Vinted...")
+
 # Récupère le token depuis Render
 TON_TOKEN = os.environ.get('DISCORD_TOKEN')
 
@@ -15,15 +17,13 @@ if not TON_TOKEN:
     print("💡 Configure DISCORD_TOKEN sur Render.com")
     exit(1)
 
-# Configuration optimisée
+print("✅ Token Discord trouvé!")
+
+# Configuration
 CONFIG = {
     'scan_interval': 300,
     'request_delay': (3, 7),
-    'max_requests_per_scan': 6,
-    'user_agents': [
-        'Mozilla/5.0 (iPhone; CPU iPhone OS 16_2 like Mac OS X) AppleWebKit/605.1.15',
-        'Mozilla/5.0 (iPad; CPU OS 16_2 like Mac OS X) AppleWebKit/605.1.15'
-    ]
+    'max_requests_per_scan': 6
 }
 
 user_searches = {}
@@ -38,8 +38,12 @@ class VintedBot(commands.Bot):
         self.scan_count = 0
         
     async def setup_hook(self):
-        await self.tree.sync()
-        print("✅ Commandes prêtes!")
+        print("🔄 Synchronisation des commandes...")
+        try:
+            await self.tree.sync()
+            print("✅ Commandes synchronisées!")
+        except Exception as e:
+            print(f"❌ Erreur synchronisation: {e}")
     
     async def on_ready(self):
         print(f'✅ {self.user.name} connecté et actif!')
@@ -47,28 +51,32 @@ class VintedBot(commands.Bot):
         self.vinted_scanner.start()
     
     async def send_startup_message(self):
-        embed = discord.Embed(
-            title="🤖 VINTED BOT ACTIVÉ",
-            description="**Je scanne Vinted 24h/24!**\nUtilise `/add` pour commencer",
-            color=0x00ff00
-        )
-        embed.add_field(
-            name="🔧 Commandes", 
-            value="`/add` - Ajouter recherche\n`/list` - Lister recherches\n`/remove` - Supprimer\n`/stats` - Statistiques", 
-            inline=False
-        )
-        
-        for channel in self.get_all_channels():
-            if isinstance(channel, discord.TextChannel):
-                await channel.send(embed=embed)
-                break
+        try:
+            embed = discord.Embed(
+                title="🤖 VINTED BOT ACTIVÉ",
+                description="**Je scanne Vinted 24h/24!**\nUtilise `/add` pour commencer",
+                color=0x00ff00
+            )
+            embed.add_field(
+                name="🔧 Commandes", 
+                value="`/add` - Ajouter recherche\n`/list` - Lister recherches\n`/remove` - Supprimer\n`/stats` - Statistiques", 
+                inline=False
+            )
+            
+            for channel in self.get_all_channels():
+                if isinstance(channel, discord.TextChannel):
+                    await channel.send(embed=embed)
+                    print("✅ Message de démarrage envoyé!")
+                    break
+        except Exception as e:
+            print(f"❌ Erreur message démarrage: {e}")
 
     def random_delay(self):
         return random.uniform(*CONFIG['request_delay'])
     
     def random_headers(self):
         return {
-            'User-Agent': random.choice(CONFIG['user_agents']),
+            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_2 like Mac OS X) AppleWebKit/605.1.15',
             'Accept': 'application/json'
         }
     
@@ -80,18 +88,20 @@ class VintedBot(commands.Bot):
                 'search_text': search_config['keywords'],
                 'price_to': search_config['max_price'],
                 'order': 'newest_first',
-                'per_page': 15
+                'per_page': 10
             }
             
             url = "https://www.vinted.fr/api/v2/catalog/items"
             response = requests.get(url, params=params, headers=self.random_headers(), timeout=10)
             
             if response.status_code == 200:
-                return response.json().get('items', [])
+                items = response.json().get('items', [])
+                print(f"🔍 {len(items)} articles trouvés pour {search_config['name']}")
+                return items
             return []
                 
         except Exception as e:
-            print(f"❌ Erreur scan: {e}")
+            print(f"❌ Erreur scan {search_config['name']}: {e}")
             return []
     
     async def check_profit(self, item, search_config):
@@ -107,6 +117,7 @@ class VintedBot(commands.Bot):
                 profit = (price * search_config['profit_margin'] * 0.87) - price - 2
                 
                 if profit >= search_config['min_profit']:
+                    print(f"💰 Bonne affaire trouvée: {title} - {price}€")
                     return {
                         'id': item_id,
                         'title': title,
@@ -117,7 +128,6 @@ class VintedBot(commands.Bot):
                     }
             return None
         except Exception as e:
-            print(f"❌ Erreur profit: {e}")
             return None
     
     async def send_notification(self, deal, user_id):
@@ -151,29 +161,30 @@ class VintedBot(commands.Bot):
     @tasks.loop(minutes=5)
     async def vinted_scanner(self):
         if not user_searches:
+            print("ℹ️  Aucune recherche configurée")
             return
         
-        print(f"🔍 Scan #{self.scan_count + 1}...")
+        print(f"🔍 Scan #{self.scan_count + 1} en cours...")
         new_deals = 0
         
         for user_id, searches in user_searches.items():
             for search_config in searches.values():
                 items = await self.scan_vinted(search_config)
                 
-                for item in items[:4]:
+                for item in items[:3]:
                     deal = await self.check_profit(item, search_config)
                     if deal:
                         await self.send_notification(deal, user_id)
                         new_deals += 1
                         await asyncio.sleep(1)
                 
-                await asyncio.sleep(self.random_delay())
+                await asyncio.sleep(2)
         
         self.scan_count += 1
         if new_deals > 0:
-            print(f"✅ {new_deals} nouvelles affaires!")
+            print(f"✅ Scan #{self.scan_count} terminé: {new_deals} nouvelles affaires!")
         else:
-            print("ℹ️  Aucune nouvelle affaire cette fois.")
+            print(f"✅ Scan #{self.scan_count} terminé: aucune nouvelle affaire")
     
     @vinted_scanner.before_loop
     async def before_scanner(self):
@@ -205,6 +216,7 @@ async def add_search(interaction: discord.Interaction, nom: str, mots_cles: str,
             color=0x00ff00
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
+        print(f"✅ Recherche ajoutée: {nom}")
     except Exception as e:
         await interaction.response.send_message("❌ Erreur lors de l'ajout!", ephemeral=True)
 
@@ -246,6 +258,7 @@ async def remove_search(interaction: discord.Interaction, numero: int):
             del user_searches[user_id][keys[numero-1]]
             
             await interaction.response.send_message(f"✅ **{search_name}** supprimée!", ephemeral=True)
+            print(f"✅ Recherche supprimée: {search_name}")
         else:
             await interaction.response.send_message("❌ Numéro invalide!", ephemeral=True)
     except Exception as e:
@@ -268,7 +281,10 @@ async def bot_stats(interaction: discord.Interaction):
 
 # 🚀 LANCEMENT
 if __name__ == "__main__":
+    print("🚀 Lancement du bot...")
     try:
         bot.run(TON_TOKEN)
     except Exception as e:
         print(f"❌ ERREUR CRITIQUE: {e}")
+        import traceback
+        traceback.print_exc()
